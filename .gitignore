@@ -1,0 +1,15 @@
+# Personal profiles (private data about real people)
+profiles/
+
+# Workshop material, not part of this project
+agentic_design_patterns.ipynb
+memory.txt
+
+# Python / Jupyter
+.venv/
+__pycache__/
+.ipynb_checkpoints/
+
+# Secrets and OS clutter
+.env
+.DS_Store

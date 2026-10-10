@@ -1,0 +1,6 @@
+(Example profile. Copy this, describe yourself, and pass the file on the command line.)
+- Loves specialty coffee and quiet places to read.
+- Into bouldering/climbing and casual hikes with good views.
+- Enjoys history and architecture, not big crowded museums.
+- Vegetarian; likes small local restaurants over chains.
+- Budget: moderate.

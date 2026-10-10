@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Activity Agent</title>
+<script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
+<style>
+  :root {
+    --bg: #f6f6f4; --panel: #ffffff; --text: #1d1d1b; --muted: #77756f;
+    --user: #1f5eff; --user-text: #ffffff; --border: #e3e2de;
+    --warn-bg: #fff6db; --warn: #7a5a00; --err-bg: #fde8e8; --err: #a12020; --link: #1f5eff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #161615; --panel: #222220; --text: #ecebe7; --muted: #9a988f;
+      --user: #3b6fff; --user-text: #ffffff; --border: #34332f;
+      --warn-bg: #3a3112; --warn: #f0cf6b; --err-bg: #3d1a1a; --err: #ff9b9b; --link: #8fb0ff;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--bg); color: var(--text);
+    font: 16px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    display: flex; flex-direction: column;
+  }
+  header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 16px; border-bottom: 1px solid var(--border); background: var(--panel);
+  }
+  header h1 { font-size: 16px; margin: 0; font-weight: 600; }
+  header button {
+    border: 1px solid var(--border); background: transparent; color: var(--text);
+    border-radius: 8px; padding: 6px 12px; font: inherit; font-size: 14px; cursor: pointer;
+  }
+  #log { flex: 1; overflow-y: auto; padding: 24px 16px; }
+  .inner { max-width: 860px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+  .msg { max-width: 85%; padding: 12px 16px; border-radius: 14px; overflow-wrap: anywhere; }
+  .user { align-self: flex-end; background: var(--user); color: var(--user-text); white-space: pre-wrap; }
+  .bot { align-self: flex-start; background: var(--panel); border: 1px solid var(--border); }
+  .bot > :first-child { margin-top: 0; } .bot > :last-child { margin-bottom: 0; }
+  .bot a { color: var(--link); }
+  .bot h1, .bot h2, .bot h3 { font-size: 1.05em; margin: 1em 0 .4em; }
+  .steps { font-size: 13px; color: var(--muted); font-family: ui-monospace, Menlo, monospace; }
+  .steps div { margin: 2px 0; } .steps div::before { content: "→ "; }
+  .steps:not(:empty) + .body:not(:empty) { margin-top: 10px; }
+  .working::after { content: "Thinking…"; color: var(--muted); font-size: 14px; }
+  .warning { margin-top: 10px; padding: 8px 10px; border-radius: 8px; background: var(--warn-bg); color: var(--warn); font-size: 14px; }
+  .error { margin-top: 10px; padding: 8px 10px; border-radius: 8px; background: var(--err-bg); color: var(--err); font-size: 14px; }
+  .empty { color: var(--muted); text-align: center; margin-top: 15vh; }
+  form { border-top: 1px solid var(--border); background: var(--panel); padding: 12px 16px; }
+  .row { max-width: 860px; margin: 0 auto; display: flex; gap: 8px; align-items: flex-end; }
+  textarea {
+    flex: 1; resize: none; min-height: 48px; max-height: 200px; padding: 12px 14px;
+    border: 1px solid var(--border); border-radius: 12px; background: var(--bg); color: var(--text);
+    font: inherit;
+  }
+  textarea:focus { outline: 2px solid var(--user); outline-offset: -1px; }
+  form button {
+    height: 48px; padding: 0 20px; border: 0; border-radius: 12px; background: var(--user);
+    color: var(--user-text); font: inherit; font-weight: 600; cursor: pointer;
+  }
+  form button:disabled { opacity: .5; cursor: default; }
+  .hint { max-width: 860px; margin: 6px auto 0; font-size: 12px; color: var(--muted); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Activity Agent</h1>
+  <button id="reset" type="button">New chat</button>
+</header>
+<main id="log"><div class="inner" id="msgs">
+  <p class="empty" id="empty">Ask for things to do, e.g. “I'm in Porto on Saturday.”</p>
+</div></main>
+<form id="form">
+  <div class="row">
+    <textarea id="input" rows="1" placeholder="Message the agent…" autofocus></textarea>
+    <button id="send" type="submit">Send</button>
+  </div>
+  <div class="hint">Enter to send · Shift+Enter for a new line</div>
+</form>
+<script>
+const msgs = document.getElementById("msgs"), log = document.getElementById("log");
+const input = document.getElementById("input"), send = document.getElementById("send");
+let session = crypto.randomUUID();
+
+function escapeHtml(s) {
+  return s.replace(/[&<>"']/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
+}
+
+// Markdown → safe HTML; every link opens in a new tab. Falls back to linkified text if the CDN is unreachable.
+function render(md) {
+  let html;
+  if (window.marked && window.DOMPurify) {
+    html = DOMPurify.sanitize(marked.parse(md, {gfm: true, breaks: true}));
+  } else {
+    html = escapeHtml(md).replace(/https?:\/\/[^\s<)]+/g, u => `<a href="${u}">${u}</a>`).replace(/\n/g, "<br>");
+  }
+  const tpl = document.createElement("template");
+  tpl.innerHTML = html;
+  tpl.content.querySelectorAll("a").forEach(a => { a.target = "_blank"; a.rel = "noopener noreferrer"; });
+  return tpl.content;
+}
+
+function add(cls, content) {
+  document.getElementById("empty")?.remove();
+  const el = document.createElement("div");
+  el.className = "msg " + cls;
+  if (content !== undefined) el.textContent = content;
+  msgs.append(el);
+  log.scrollTop = log.scrollHeight;
+  return el;
+}
+
+async function ask(text) {
+  add("user", text);
+  const bot = add("bot working");
+  const steps = bot.appendChild(document.createElement("div")); steps.className = "steps";
+  const body = bot.appendChild(document.createElement("div")); body.className = "body";
+  const note = (cls, t) => { const d = bot.appendChild(document.createElement("div")); d.className = cls; d.textContent = t; };
+
+  try {
+    const res = await fetch("/chat", {method: "POST", headers: {"Content-Type": "application/json"},
+                                      body: JSON.stringify({session, message: text})});
+    if (!res.ok) throw new Error(`Server returned HTTP ${res.status}`);
+    const reader = res.body.getReader(), dec = new TextDecoder();
+    let buf = "";
+    for (;;) {
+      const {value, done} = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, {stream: true});
+      let i;
+      while ((i = buf.indexOf("\n")) >= 0) {
+        const {kind, text: t} = JSON.parse(buf.slice(0, i));
+        buf = buf.slice(i + 1);
+        if (kind === "tool") steps.append(Object.assign(document.createElement("div"), {textContent: t}));
+        else if (kind === "note") steps.append(Object.assign(document.createElement("div"), {textContent: `(${t})`}));
+        else if (kind === "answer") { bot.classList.remove("working"); body.replaceChildren(render(t)); }
+        else if (kind === "warning") note("warning", "⚠ " + t);
+        else if (kind === "error") { bot.classList.remove("working"); note("error", t + " — turn aborted, no answer was generated."); }
+        log.scrollTop = log.scrollHeight;
+      }
+    }
+  } catch (e) {
+    note("error", `Could not reach the agent: ${e.message}`);
+  }
+  bot.classList.remove("working");
+}
+
+document.getElementById("form").addEventListener("submit", async e => {
+  e.preventDefault();
+  const text = input.value.trim();
+  if (!text || send.disabled) return;
+  input.value = ""; input.style.height = "";
+  send.disabled = true;
+  await ask(text);
+  send.disabled = false;
+  input.focus();
+});
+
+input.addEventListener("keydown", e => {
+  if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
+    e.preventDefault();
+    document.getElementById("form").requestSubmit();
+  }
+});
+input.addEventListener("input", () => { input.style.height = ""; input.style.height = input.scrollHeight + "px"; });
+
+document.getElementById("reset").addEventListener("click", () => {
+  session = crypto.randomUUID();
+  msgs.replaceChildren(Object.assign(document.createElement("p"),
+    {className: "empty", id: "empty", textContent: "New chat. Ask for things to do."}));
+  input.focus();
+});
+</script>
+</body>
+</html>

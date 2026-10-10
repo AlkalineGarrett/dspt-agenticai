@@ -1,0 +1,3 @@
+# Python >= 3.10. Also needs Ollama running locally with qwen3.5:9b pulled.
+google-adk==2.11.0
+litellm==1.104.0
